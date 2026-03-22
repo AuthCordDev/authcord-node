@@ -1,0 +1,20 @@
+{
+  "name": "@authcord/sdk",
+  "version": "1.0.0",
+  "description": "Official AuthCord SDK for Node.js",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "AuthCord",
+  "license": "MIT"
+}
