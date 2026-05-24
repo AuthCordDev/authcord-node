@@ -157,3 +157,47 @@ export interface ValidateSessionOptions {
   binary_hash?: string;
   app_version?: string;
 }
+
+/**
+ * Result of a heartbeat check. `valid=false` means the session has been
+ * terminated by an admin, the user has been banned/paused, the product
+ * expired, or the HWID was unbound. `reason` carries the machine-readable
+ * code (e.g. "terminated", "banned", "expired", "hwid_unbound") so the
+ * client can branch on it.
+ */
+export interface HeartbeatResult {
+  valid: boolean;
+  reason?: string;
+  /** Server-suggested seconds until the next heartbeat. Default 10. */
+  next_heartbeat_in: number;
+}
+
+/**
+ * Options for a single heartbeat() call. Pass either `session_token` or
+ * both `discord_id` and `hwid`.
+ */
+export interface HeartbeatOptions {
+  app_id: string;
+  session_token?: string;
+  discord_id?: string;
+  hwid?: string;
+}
+
+/**
+ * Options for startHeartbeat(). Extends HeartbeatOptions with the
+ * callback for termination and an optional fixed interval.
+ */
+export interface StartHeartbeatOptions extends HeartbeatOptions {
+  onTerminated: (result: HeartbeatResult) => void;
+  onError?: (err: unknown) => void;
+  /** Fixed seconds between polls. When omitted, honours server-suggested next_heartbeat_in. */
+  intervalSeconds?: number;
+}
+
+/**
+ * Handle returned from startHeartbeat(). Call .stop() to cancel the loop.
+ */
+export interface HeartbeatHandle {
+  stop: () => void;
+  isRunning: () => boolean;
+}

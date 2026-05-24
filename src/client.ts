@@ -15,6 +15,10 @@ import type {
   ValidateOptions,
   CreateSessionOptions,
   ValidateSessionOptions,
+  HeartbeatResult,
+  HeartbeatOptions,
+  StartHeartbeatOptions,
+  HeartbeatHandle,
 } from './types.js';
 
 /**
@@ -117,6 +121,91 @@ export class AuthCordClient {
     if (options.app_version !== undefined) body.app_version = options.app_version;
 
     return this.request<ValidationResult>('POST', '/api/v1/auth/sessions/validate', body);
+  }
+
+  /**
+   * Single heartbeat check — returns whether the user's session is still
+   * live. Pass `session_token` (DeviceSession flow) OR both `discord_id`
+   * and `hwid` (validate-only flow). Cheap and rate-limited to ~2/sec/IP
+   * on the server side, intended to be called every few seconds from
+   * your app's main loop.
+   */
+  async heartbeat(options: HeartbeatOptions): Promise<HeartbeatResult> {
+    if (!options.session_token && !(options.discord_id && options.hwid)) {
+      throw new Error('Provide session_token, or both discord_id and hwid');
+    }
+    const body: Record<string, unknown> = { app_id: options.app_id };
+    if (options.session_token) body.session_token = options.session_token;
+    if (options.discord_id) body.discord_id = options.discord_id;
+    if (options.hwid) body.hwid = options.hwid;
+    const result = await this.request<HeartbeatResult>(
+      'POST',
+      '/api/v1/auth/heartbeat',
+      body,
+    );
+    return {
+      valid: !!result.valid,
+      reason: result.reason,
+      next_heartbeat_in: Number(result.next_heartbeat_in ?? 10),
+    };
+  }
+
+  /**
+   * Start a background heartbeat loop. Calls `onTerminated` exactly once
+   * when the server returns `valid=false`, then stops. Your app should
+   * use the callback to log the user out / return to the login screen.
+   *
+   * Returns a handle with `.stop()` to cancel the loop early (e.g. when
+   * the user signs out normally).
+   *
+   * Network errors are passed to `onError` and the loop continues. The
+   * server's `next_heartbeat_in` value controls the cadence when
+   * `intervalSeconds` isn't pinned by the caller.
+   */
+  startHeartbeat(options: StartHeartbeatOptions): HeartbeatHandle {
+    if (!options.session_token && !(options.discord_id && options.hwid)) {
+      throw new Error('Provide session_token, or both discord_id and hwid');
+    }
+    let stopped = false;
+    let timer: NodeJS.Timeout | undefined;
+    let waitSeconds = options.intervalSeconds ?? 10;
+
+    const tick = async (): Promise<void> => {
+      if (stopped) return;
+      try {
+        const result = await this.heartbeat({
+          app_id: options.app_id,
+          session_token: options.session_token,
+          discord_id: options.discord_id,
+          hwid: options.hwid,
+        });
+        if (!result.valid) {
+          stopped = true;
+          try { options.onTerminated(result); } catch { /* swallow user errors */ }
+          return;
+        }
+        if (options.intervalSeconds === undefined) {
+          waitSeconds = Math.max(1, result.next_heartbeat_in);
+        }
+      } catch (err) {
+        if (options.onError) {
+          try { options.onError(err); } catch { /* swallow user errors */ }
+        }
+      }
+      if (!stopped) {
+        timer = setTimeout(() => { void tick(); }, waitSeconds * 1000);
+      }
+    };
+
+    timer = setTimeout(() => { void tick(); }, waitSeconds * 1000);
+
+    return {
+      stop: () => {
+        stopped = true;
+        if (timer) clearTimeout(timer);
+      },
+      isRunning: () => !stopped,
+    };
   }
 
   /**

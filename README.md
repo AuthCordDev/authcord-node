@@ -42,6 +42,30 @@ const session = await client.createSession({
 });
 ```
 
+## Real-time Session Kick (Heartbeat)
+
+After `validate()` succeeds, run a background heartbeat so an admin clicking **Terminate** in the dashboard takes effect within ~10 seconds instead of waiting for the user's next manual validate.
+
+```ts
+const handle = client.startHeartbeat({
+  app_id: 'your_app_id',
+  discord_id: '123456789',
+  hwid: 'HWID-ABC',
+  onTerminated: (hb) => {
+    console.error(`Session ended: ${hb.reason}`); // "terminated", "banned", "expired", ...
+    // Tear down: close the app, redirect to login, clear in-memory secrets, etc.
+    process.exit(0);
+  },
+  // onError: (err) => ...        // optional; loop keeps running on transient errors
+  // intervalSeconds: 10,         // optional; otherwise the server controls cadence
+});
+
+// ... your app does its thing ...
+handle.stop();  // clean shutdown on normal sign-out
+```
+
+For a DeviceSession-based flow, pass `session_token` instead of `discord_id` + `hwid`. Full runnable example in `examples/heartbeat-realtime.ts`.
+
 ## Email-Based Validation
 
 AuthCord supports validating users by Discord ID, user ID, or email:

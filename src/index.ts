@@ -23,4 +23,8 @@ export type {
   ValidateOptions,
   CreateSessionOptions,
   ValidateSessionOptions,
+  HeartbeatResult,
+  HeartbeatOptions,
+  StartHeartbeatOptions,
+  HeartbeatHandle,
 } from './types.js';
