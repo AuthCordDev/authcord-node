@@ -19,7 +19,62 @@ import type {
   HeartbeatOptions,
   StartHeartbeatOptions,
   HeartbeatHandle,
+  HwidComponents,
 } from './types.js';
+
+/**
+ * Best-effort collector for spoofer-resistant HWID components.
+ *
+ * On Windows: populates `sid` via `whoami /user`, `cpu_id` via `wmic
+ * cpu get ProcessorId`, and `machine_guid` from the registry. Returns
+ * an empty object on other platforms — cross-platform callers should
+ * fill the struct themselves.
+ *
+ * Pass the returned object as `hwid_components` to `client.validate({...})`
+ * (and `client.startHeartbeat({...})`) when your app's HWID Strategy is
+ * `STABLE` or `STRICT`. Backwards-compat: still send your legacy `hwid`
+ * string alongside so users on apps still on `LEGACY` keep working.
+ */
+export async function collectHwidComponents(): Promise<HwidComponents> {
+  const out: HwidComponents = {};
+  if (process.platform !== 'win32') return out;
+
+  // Avoid hard-importing child_process at module top-level so consumers
+  // bundling for the browser don't trip over it. `await import()` is fine
+  // in Node ESM and gets tree-shaken otherwise.
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+
+  // ── Windows User SID ──
+  try {
+    const { stdout } = await run('whoami', ['/user', '/fo', 'csv', '/nh'], { timeout: 5000 });
+    const match = stdout.match(/S-1-5-[\d-]+/);
+    if (match) out.sid = match[0];
+  } catch { /* ignore */ }
+
+  // ── CPU ID ──
+  try {
+    const { stdout } = await run('wmic', ['cpu', 'get', 'ProcessorId', '/value'], { timeout: 5000 });
+    const line = stdout.split(/\r?\n/).find(l => l.trim().startsWith('ProcessorId='));
+    const val = line?.split('=', 2)[1]?.trim();
+    if (val) out.cpu_id = val;
+  } catch { /* ignore */ }
+
+  // ── MachineGuid ──
+  try {
+    const { stdout } = await run(
+      'reg',
+      ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'],
+      { timeout: 5000 },
+    );
+    // Output: "    MachineGuid    REG_SZ    xxxxx-xxxx-..."
+    const match = stdout.match(/MachineGuid\s+REG_SZ\s+([\w-]+)/);
+    if (match) out.machine_guid = match[1];
+  } catch { /* ignore */ }
+
+  return out;
+}
 
 /**
  * Client options.
@@ -76,6 +131,13 @@ export class AuthCordClient {
     if (options.email !== undefined) body.email = options.email;
     if (options.product_id !== undefined) body.product_id = options.product_id;
     if (options.hwid !== undefined) body.hwid = options.hwid;
+    if (options.hwid_components) {
+      const comp: Record<string, string> = {};
+      for (const [k, v] of Object.entries(options.hwid_components)) {
+        if (typeof v === 'string' && v.length > 0) comp[k] = v;
+      }
+      if (Object.keys(comp).length > 0) body.hwid_components = comp;
+    }
     if (options.ip !== undefined) body.ip = options.ip;
     if (options.user_agent !== undefined) body.user_agent = options.user_agent;
     if (options.device_meta !== undefined) body.device_meta = options.device_meta;
@@ -131,13 +193,21 @@ export class AuthCordClient {
    * your app's main loop.
    */
   async heartbeat(options: HeartbeatOptions): Promise<HeartbeatResult> {
-    if (!options.session_token && !(options.discord_id && options.hwid)) {
-      throw new Error('Provide session_token, or both discord_id and hwid');
+    const hasHwidSignal = !!options.hwid || !!(options.hwid_components && Object.values(options.hwid_components).some(v => typeof v === 'string' && v.length > 0));
+    if (!options.session_token && !(options.discord_id && hasHwidSignal)) {
+      throw new Error('Provide session_token, or discord_id with hwid or hwid_components');
     }
     const body: Record<string, unknown> = { app_id: options.app_id };
     if (options.session_token) body.session_token = options.session_token;
     if (options.discord_id) body.discord_id = options.discord_id;
     if (options.hwid) body.hwid = options.hwid;
+    if (options.hwid_components) {
+      const comp: Record<string, string> = {};
+      for (const [k, v] of Object.entries(options.hwid_components)) {
+        if (typeof v === 'string' && v.length > 0) comp[k] = v;
+      }
+      if (Object.keys(comp).length > 0) body.hwid_components = comp;
+    }
     const result = await this.request<HeartbeatResult>(
       'POST',
       '/api/v1/auth/heartbeat',

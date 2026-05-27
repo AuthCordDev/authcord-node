@@ -1,4 +1,4 @@
-export { AuthCordClient } from './client.js';
+export { AuthCordClient, collectHwidComponents } from './client.js';
 export type { AuthCordClientOptions } from './client.js';
 
 export {
@@ -27,4 +27,5 @@ export type {
   HeartbeatOptions,
   StartHeartbeatOptions,
   HeartbeatHandle,
+  HwidComponents,
 } from './types.js';

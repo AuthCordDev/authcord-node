@@ -124,6 +124,7 @@ export interface ValidateOptions {
   app_id: string;
   product_id?: string;
   hwid?: string;
+  hwid_components?: HwidComponents;
   ip?: string;
   user_agent?: string;
   device_meta?: Record<string, unknown>;
@@ -159,6 +160,28 @@ export interface ValidateSessionOptions {
 }
 
 /**
+ * Structured HWID components. The server hashes a subset of these
+ * (determined by the app's HWID Strategy in the dashboard) to derive
+ * the canonical HWID used for slot matching.
+ *
+ * Typical temp HWID spoofers (used to evade FiveM-style server bans)
+ * change SMBIOS UUID, disk serial, MAC, and MachineGuid — but NOT
+ * the Windows User SID or CPUID. Apps using `STABLE` hash only
+ * (sid + cpu_id) so users stay bound across spoofs.
+ *
+ * On Windows, call `collectHwidComponents()` to populate
+ * `sid` + `cpu_id` + `machine_guid` automatically. Otherwise fill
+ * the fields yourself.
+ */
+export interface HwidComponents {
+  sid?: string;
+  cpu_id?: string;
+  machine_guid?: string;
+  mac?: string;
+  disk?: string;
+}
+
+/**
  * Result of a heartbeat check. `valid=false` means the session has been
  * terminated by an admin, the user has been banned/paused, the product
  * expired, or the HWID was unbound. `reason` carries the machine-readable
@@ -181,6 +204,7 @@ export interface HeartbeatOptions {
   session_token?: string;
   discord_id?: string;
   hwid?: string;
+  hwid_components?: HwidComponents;
 }
 
 /**
